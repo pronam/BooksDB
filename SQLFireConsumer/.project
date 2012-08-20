@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>SQLFireConsumer</name>
+	<comment>This is the parent project of the spring-batch and spring-amqp integration example.This project uses
+        spring
+        batch to process a CSV file that contains a 2000+ books and then uses a producer to asynchronously publish the
+        processed data into a rabbitmq exchange. There is then a consumer that picks up the information from the queue
+        and
+        synchronously writes the information into a sqlfire database using spring-gemfire project bindings. NO_M2ECLIPSE_SUPPORT: Project files created with the maven-eclipse-plugin are not supported in M2Eclipse.</comment>
+	<projects>
+		<project>Common</project>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.jdt.core.javabuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.m2e.core.maven2Builder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.m2e.core.maven2Nature</nature>
+		<nature>org.eclipse.jdt.core.javanature</nature>
+	</natures>
+</projectDescription>

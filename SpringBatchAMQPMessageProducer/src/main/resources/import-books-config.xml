@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ~ Copyright (c) 2011. Written by Pronam Chatterjee. Copying and Use prohibited unless explicit permission is granted.
+  -->
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+	http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+	http://www.springframework.org/schema/batch
+	http://www.springframework.org/schema/batch/spring-batch-2.1.xsd http://www.springframework.org/schema/rabbit http://www.springframework.org/schema/rabbit/spring-rabbit-1.0.xsd">
+
+    <bean id="jobRepository"
+          class="org.springframework.batch.core.repository.support.SimpleJobRepository">
+        <constructor-arg ref="mapJobInstanceDao"/>
+        <constructor-arg ref="mapJobExecutionDao"/>
+        <constructor-arg ref="mapStepExecutionDao"/>
+        <constructor-arg ref="mapJobExecutionContextDao"/>
+    </bean>
+    <bean id="mapJobInstanceDao"
+          class="org.springframework.batch.core.repository.dao.MapJobInstanceDao"/>
+
+    <bean id="mapJobExecutionDao"
+          class="org.springframework.batch.core.repository.dao.MapJobExecutionDao"/>
+
+    <bean id="mapStepExecutionDao"
+          class="org.springframework.batch.core.repository.dao.MapStepExecutionDao"/>
+    <batch:job id="importBooks">
+        <batch:step id="decompress" next="readEnqueueBooks">
+            <batch:tasklet ref="decompressTasklet">
+            </batch:tasklet>
+        </batch:step>
+        <batch:step id="readEnqueueBooks">
+            <batch:tasklet>
+                <batch:chunk reader="reader" writer="writer" commit-interval="100" skip-limit="5">
+                    <batch:skippable-exception-classes>
+                        <batch:include class="org.springframework.batch.item.file.FlatFileParseException"/>
+                    </batch:skippable-exception-classes>
+                </batch:chunk>
+            </batch:tasklet>
+        </batch:step>
+    </batch:job>
+
+    <bean id="transactionManager"
+          class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <property name="dataSource" ref="dataSource"/>
+
+    </bean>
+
+    <bean id="jobLauncher"
+          class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+        <property name="jobRepository" ref="jobRepository"/>
+    </bean>
+
+    <bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource">
+        <property name="driverClassName" value="com.vmware.sqlfire.jdbc.ClientDriver"/>
+        <property name="url" value="jdbc:sqlfire://localhost:1527"/>
+        <property name="username" value="books"/>
+        <property name="password" value="password"/>
+    </bean>
+
+
+    <!--<bean id="transactionManager" class="org.springframework.amqp.rabbit.transaction.RabbitTransactionManager">
+        <property name="connectionFactory" ref="connectionFactory"/>
+    </bean>-->
+
+    <!-- <rabbit:connection-factory id="connectionFactory"/>
+
+   <rabbit:admin connection-factory="connectionFactory"/>-->
+
+    <bean id="decompressTasklet" class="com.vmware.vfabric.booksdb.batch.DecompressTasklet" scope="step">
+        <property name="resource" value="#{jobParameters['inputResource']}"/>
+        <property name="targetDirectory" value="#{jobParameters['targetDirectory']}"/>
+        <property name="targetFile" value="#{jobParameters['targetFile']}"/>
+    </bean>
+
+    <bean id="reader" class="org.springframework.batch.item.file.FlatFileItemReader" scope="step">
+        <property name="resource" value="file:#{jobParameters['targetDirectory']+jobParameters['targetFile']}"/>
+        <property name="linesToSkip" value="1"/>
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer">
+                    <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer">
+                        <property name="names" value="BOOK_ID,NAME,TAG,LOCATION,TYPE,SIZE"/>
+                    </bean>
+                </property>
+                <property name="fieldSetMapper">
+                    <bean class="com.vmware.vfabric.booksdb.batch.BooksFieldSetMapper"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <!-- TODO Fix this thing -->
+    <bean id="writer" class="com.vmware.vfabric.booksdb.batch.ProductAMQPItemWriter"/>
+    <bean id="mapJobExecutionContextDao" class="org.springframework.batch.core.repository.dao.MapExecutionContextDao"/>
+
+    <!--<bean id="amqpConnectionFactory" class="org.springframework.amqp.rabbit.connection.CachingConnectionFactory">
+        <constructor-arg value="localhost"/>
+        <property name="username" value="guest"/>
+        <property name="password" value="guest"/>
+    </bean>-->
+
+    <rabbit:admin connection-factory="amqpConnectionFactory" auto-startup="true"/>
+
+    <!--  <bean id="rabbitTemplate" class="org.springframework.amqp.rabbit.core.RabbitTemplate">
+        <property name="connectionFactory" ref="amqpConnectionFactory"/>
+        <property name="routingKey" value="books.queue"/>
+    </bean>-->
+
+    <rabbit:connection-factory id="amqpConnectionFactory" host="localhost" username="guest" password="guest"/>
+    <rabbit:template connection-factory="amqpConnectionFactory" routing-key="books.queue" queue="books.queue"/>
+
+    <bean id="registry"
+          class="org.springframework.remoting.rmi.RmiRegistryFactoryBean">
+        <property name="host" value="localhost"/>
+        <property name="port" value="1099"/>
+    </bean>
+
+    <bean id="serverConnector"
+          class="org.springframework.jmx.support.ConnectorServerFactoryBean">
+        <property name="objectName" value="connector:name=rmi"/>
+        <property name="serviceUrl"
+                  value="service:jmx:rmi://localhost/jndi/rmi://localhost:1099/myconnector"/>
+        <property name="threaded" value="true"/>
+    </bean>
+
+    <bean class="org.springframework.jmx.export.MBeanExporter">
+        <property name="beans">
+            <map>
+                <entry key="spring:service=batch,bean=jobOperator">
+                    <bean class="org.springframework.aop.framework.ProxyFactoryBean">
+                        <property name="target" ref="jobOperator" />
+                        <property name="interceptorNames" value="exceptionTranslator" />
+                    </bean>
+                </entry>
+                <!-- entry key="spring:service=batch,bean=notificationPublisher" value-ref="notificationPublisher" / -->
+                <entry key="spring:service=batch,bean=jobLoader" value-ref="loader" />
+            </map>
+        </property>
+        <property name="assembler">
+            <bean class="org.springframework.jmx.export.assembler.InterfaceBasedMBeanInfoAssembler">
+                <property name="interfaceMappings">
+                    <map>
+                        <entry key="spring:service=batch,bean=jobOperator"
+                               value="org.springframework.batch.core.launch.JobOperator" />
+                        <entry key="spring:service=batch,bean=jobLoader"
+                               value="org.springframework.batch.core.configuration.support.JobLoader" />
+                    </map>
+                </property>
+            </bean>
+        </property>
+    </bean>
+    <bean id="jobRegistry" class="org.springframework.batch.core.configuration.support.MapJobRegistry" />
+    <bean id="jobOperator" class="org.springframework.batch.core.launch.support.SimpleJobOperator">
+        <property name="jobExplorer">
+            <bean class="org.springframework.batch.core.explore.support.JobExplorerFactoryBean">
+                <property name="dataSource" ref="dataSource" />
+            </bean>
+        </property>
+        <property name="jobRepository" ref="jobRepository" />
+        <property name="jobRegistry" ref="jobRegistry" />
+        <property name="jobLauncher">
+            <bean parent="jobLauncher">
+                <property name="taskExecutor">
+                    <bean class="org.springframework.core.task.SimpleAsyncTaskExecutor" />
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <bean id="exceptionTranslator" class="org.springframework.batch.core.launch.support.RuntimeExceptionTranslator" />
+
+    <bean id="loader" class="com.vmware.vfabric.booksdb.batch.DefaultJobLoader">
+        <property name="registry" ref="jobRegistry" />
+    </bean>
+
+
+
+</beans>
